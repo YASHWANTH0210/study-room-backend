@@ -14,25 +14,38 @@ const io = new Server(server, {
   }
 });
 
-// Store room timers and notes in memory
 const roomTimers = {};
 const roomNotes = {};
+const roomUsers = {}; // Track users per room
 
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
   socket.on('join_room', (data) => {
     socket.join(data.roomCode);
-    console.log(`User ${data.username} joined room: ${data.roomCode}`);
+    socket.username = data.username;
+    socket.roomCode = data.roomCode;
 
-    // Send existing note for this room if any
+    // Add user to room list
+    if (!roomUsers[data.roomCode]) {
+      roomUsers[data.roomCode] = [];
+    }
+    // Prevent duplicate entries
+    if (!roomUsers[data.roomCode].some(u => u.id === socket.id)) {
+      roomUsers[data.roomCode].push({ id: socket.id, username: data.username });
+    }
+
+    // Broadcast updated user list to room
+    io.to(data.roomCode).emit('update_users', roomUsers[data.roomCode]);
+
+    // Send existing notes
     if (roomNotes[data.roomCode]) {
       socket.emit('load_note', roomNotes[data.roomCode]);
     } else {
       socket.emit('load_note', '');
     }
 
-    // Send current timer status for this room
+    // Send timer status
     if (roomTimers[data.roomCode]) {
       socket.emit('timer_update', roomTimers[data.roomCode].timeLeft);
     } else {
@@ -49,7 +62,7 @@ io.on('connection', (socket) => {
     socket.to(data.roomCode).emit('receive_note', data.text);
   });
 
-  // --- Pomodoro Timer Events ---
+  // Pomodoro Timer Events
   socket.on('start_timer', (roomCode) => {
     if (!roomTimers[roomCode]) {
       roomTimers[roomCode] = { timeLeft: 25 * 60, isRunning: true };
@@ -88,6 +101,11 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${socket.id}`);
+    const roomCode = socket.roomCode;
+    if (roomCode && roomUsers[roomCode]) {
+      roomUsers[roomCode] = roomUsers[roomCode].filter(u => u.id !== socket.id);
+      io.to(roomCode).emit('update_users', roomUsers[roomCode]);
+    }
   });
 });
 
