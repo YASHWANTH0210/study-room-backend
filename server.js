@@ -27,8 +27,16 @@ io.on('connection', (socket) => {
   });
 
   socket.on('update_note', (data) => {
-    socket.to(data.roomCode).emit('receive_note', data);
-  });
+       // data can be either the text string or { roomCode, text } depending on what was emitted
+       const noteContent = typeof data === 'object' ? data.text : data;
+       const room = typeof data === 'object' ? data.roomCode : null;
+       
+       if (room) {
+         socket.to(room).emit('receive_note', noteContent);
+       } else {
+         socket.broadcast.emit('receive_note', data);
+       }
+     });
 
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
