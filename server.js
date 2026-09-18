@@ -16,38 +16,48 @@ const io = new Server(server, {
 
 const roomTimers = {};
 const roomNotes = {};
-const roomUsers = {}; // Track users per room
+const roomUsers = {};
+const roomPasswords = {}; // Track room passwords
 
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
   socket.on('join_room', (data) => {
-    socket.join(data.roomCode);
-    socket.username = data.username;
-    socket.roomCode = data.roomCode;
+    const { username, roomCode, password } = data;
 
-    // Add user to room list
-    if (!roomUsers[data.roomCode]) {
-      roomUsers[data.roomCode] = [];
-    }
-    // Prevent duplicate entries
-    if (!roomUsers[data.roomCode].some(u => u.id === socket.id)) {
-      roomUsers[data.roomCode].push({ id: socket.id, username: data.username });
+    // Check if room has an existing password and validate it
+    if (roomPasswords[roomCode] && roomPasswords[roomCode] !== password) {
+      socket.emit('auth_error', 'Incorrect room password! Please try again.');
+      return;
     }
 
-    // Broadcast updated user list to room
-    io.to(data.roomCode).emit('update_users', roomUsers[data.roomCode]);
+    // If room has no password set yet, set it now
+    if (!roomPasswords[roomCode]) {
+      roomPasswords[roomCode] = password || '';
+    }
 
-    // Send existing notes
-    if (roomNotes[data.roomCode]) {
-      socket.emit('load_note', roomNotes[data.roomCode]);
+    socket.join(roomCode);
+    socket.username = username;
+    socket.roomCode = roomCode;
+
+    if (!roomUsers[roomCode]) {
+      roomUsers[roomCode] = [];
+    }
+    if (!roomUsers[roomCode].some(u => u.id === socket.id)) {
+      roomUsers[roomCode].push({ id: socket.id, username: username });
+    }
+
+    io.to(roomCode).emit('update_users', roomUsers[roomCode]);
+    socket.emit('auth_success'); // Let frontend know login succeeded
+
+    if (roomNotes[roomCode]) {
+      socket.emit('load_note', roomNotes[roomCode]);
     } else {
       socket.emit('load_note', '');
     }
 
-    // Send timer status
-    if (roomTimers[data.roomCode]) {
-      socket.emit('timer_update', roomTimers[data.roomCode].timeLeft);
+    if (roomTimers[roomCode]) {
+      socket.emit('timer_update', roomTimers[roomCode].timeLeft);
     } else {
       socket.emit('timer_update', 25 * 60);
     }
