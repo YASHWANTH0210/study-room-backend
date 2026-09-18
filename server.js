@@ -28,6 +28,21 @@ io.on('connection', (socket) => {
 
   socket.on('join_room', (data) => {
     const { username, roomCode, password } = data;
+    // --- Voice Chat Signaling Events ---
+  socket.on('join_voice', (roomCode) => {
+    socket.to(roomCode).emit('user_joined_voice', socket.id);
+  });
+
+  socket.on('signal', (data) => {
+    io.to(data.to).emit('signal', {
+      signal: data.signal,
+      from: socket.id
+    });
+  });
+
+  socket.on('leave_voice', (roomCode) => {
+    socket.to(roomCode).emit('user_left_voice', socket.id);
+  });
 
     // Check if room has an existing password and validate it
     if (roomPasswords[roomCode] && roomPasswords[roomCode] !== password) {
