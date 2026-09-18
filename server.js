@@ -21,6 +21,10 @@ const roomPasswords = {}; // Track room passwords
 
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
+  // Handle file sharing
+  socket.on('send_file', (data) => {
+    socket.to(data.roomCode).emit('receive_file', data);
+  });
 
   socket.on('join_room', (data) => {
     const { username, roomCode, password } = data;
