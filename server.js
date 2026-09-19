@@ -73,7 +73,7 @@ io.on('connection', (socket) => {
     socket.to(roomCode).emit('receive_note', text);
   });
 
-  // --- Whiteboard Events ---
+  // Whiteboard Events
   socket.on('drawing', (data) => {
     socket.to(data.roomCode).emit('receive_drawing', data);
   });
@@ -133,6 +133,22 @@ io.on('connection', (socket) => {
     socket.to(roomCode).emit('user_left_voice', socket.id);
   });
 
+  // Screen Sharing Signaling Events
+  socket.on('join_screen', (roomCode) => {
+    socket.to(roomCode).emit('user_joined_screen', socket.id);
+  });
+
+  socket.on('screen_signal', (data) => {
+    io.to(data.to).emit('screen_signal', {
+      signal: data.signal,
+      from: socket.id
+    });
+  });
+
+  socket.on('leave_screen', (roomCode) => {
+    socket.to(roomCode).emit('user_left_screen', socket.id);
+  });
+
   // Disconnect handling
   socket.on('disconnect', () => {
     console.log(`User Disconnected: ${socket.id}`);
@@ -144,6 +160,7 @@ io.on('connection', (socket) => {
         room.users.splice(index, 1);
         io.to(roomCode).emit('update_users', room.users);
         io.to(roomCode).emit('user_left_voice', socket.id);
+        io.to(roomCode).emit('user_left_screen', socket.id);
 
         // Cleanup room if empty
         if (room.users.length === 0) {
