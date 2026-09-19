@@ -17,40 +17,19 @@ const io = new Server(server, {
 const roomTimers = {};
 const roomNotes = {};
 const roomUsers = {};
-const roomPasswords = {}; // Track room passwords
+const roomPasswords = {};
 
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
-  // Handle file sharing
-  socket.on('send_file', (data) => {
-    socket.to(data.roomCode).emit('receive_file', data);
-  });
 
   socket.on('join_room', (data) => {
     const { username, roomCode, password } = data;
-    // --- Voice Chat Signaling Events ---
-  socket.on('join_voice', (roomCode) => {
-    socket.to(roomCode).emit('user_joined_voice', socket.id);
-  });
 
-  socket.on('signal', (data) => {
-    io.to(data.to).emit('signal', {
-      signal: data.signal,
-      from: socket.id
-    });
-  });
-
-  socket.on('leave_voice', (roomCode) => {
-    socket.to(roomCode).emit('user_left_voice', socket.id);
-  });
-
-    // Check if room has an existing password and validate it
     if (roomPasswords[roomCode] && roomPasswords[roomCode] !== password) {
       socket.emit('auth_error', 'Incorrect room password! Please try again.');
       return;
     }
 
-    // If room has no password set yet, set it now
     if (!roomPasswords[roomCode]) {
       roomPasswords[roomCode] = password || '';
     }
@@ -67,7 +46,7 @@ io.on('connection', (socket) => {
     }
 
     io.to(roomCode).emit('update_users', roomUsers[roomCode]);
-    socket.emit('auth_success'); // Let frontend know login succeeded
+    socket.emit('auth_success');
 
     if (roomNotes[roomCode]) {
       socket.emit('load_note', roomNotes[roomCode]);
@@ -84,6 +63,10 @@ io.on('connection', (socket) => {
 
   socket.on('send_message', (data) => {
     socket.to(data.roomCode).emit('receive_message', data);
+  });
+
+  socket.on('send_file', (data) => {
+    socket.to(data.roomCode).emit('receive_file', data);
   });
 
   socket.on('update_note', (data) => {
@@ -126,6 +109,22 @@ io.on('connection', (socket) => {
       roomTimers[roomCode].timeLeft = 25 * 60;
       io.to(roomCode).emit('timer_update', roomTimers[roomCode].timeLeft);
     }
+  });
+
+  // Voice Chat Signaling Events
+  socket.on('join_voice', (roomCode) => {
+    socket.to(roomCode).emit('user_joined_voice', socket.id);
+  });
+
+  socket.on('signal', (data) => {
+    io.to(data.to).emit('signal', {
+      signal: data.signal,
+      from: socket.id
+    });
+  });
+
+  socket.on('leave_voice', (roomCode) => {
+    socket.to(roomCode).emit('user_left_voice', socket.id);
   });
 
   socket.on('disconnect', () => {
