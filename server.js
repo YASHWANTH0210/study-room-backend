@@ -14,104 +14,110 @@ const io = new Server(server, {
   }
 });
 
-const roomTimers = {};
-const roomNotes = {};
-const roomUsers = {};
-const roomPasswords = {};
+// Room data store
+const rooms = {};
 
 io.on('connection', (socket) => {
-  console.log(`User connected: ${socket.id}`);
+  console.log(`User Connected: ${socket.id}`);
 
-  socket.on('join_room', (data) => {
-    const { username, roomCode, password } = data;
+  // Room Joining & Password Authentication
+  socket.on('join_room', ({ username, roomCode, password }) => {
+    if (!rooms[roomCode]) {
+      rooms[roomCode] = {
+        password: password || '',
+        notes: '',
+        timer: 1500,
+        timerRunning: false,
+        timerInterval: null,
+        users: []
+      };
+    }
 
-    if (roomPasswords[roomCode] && roomPasswords[roomCode] !== password) {
-      socket.emit('auth_error', 'Incorrect room password! Please try again.');
+    const room = rooms[roomCode];
+
+    // Check password if room has one set
+    if (room.password && room.password !== password) {
+      socket.emit('auth_error', 'Incorrect room password!');
       return;
     }
 
-    if (!roomPasswords[roomCode]) {
-      roomPasswords[roomCode] = password || '';
-    }
-
-    socket.join(roomCode);
-    socket.username = username;
-    socket.roomCode = roomCode;
-
-    if (!roomUsers[roomCode]) {
-      roomUsers[roomCode] = [];
-    }
-    if (!roomUsers[roomCode].some(u => u.id === socket.id)) {
-      roomUsers[roomCode].push({ id: socket.id, username: username });
-    }
-
-    io.to(roomCode).emit('update_users', roomUsers[roomCode]);
     socket.emit('auth_success');
+    socket.join(roomCode);
 
-    if (roomNotes[roomCode]) {
-      socket.emit('load_note', roomNotes[roomCode]);
-    } else {
-      socket.emit('load_note', '');
-    }
+    // Track user
+    room.users.push({ id: socket.id, username });
+    io.to(roomCode).emit('update_users', room.users);
 
-    if (roomTimers[roomCode]) {
-      socket.emit('timer_update', roomTimers[roomCode].timeLeft);
-    } else {
-      socket.emit('timer_update', 25 * 60);
-    }
+    // Send current notes and timer state to newly joined user
+    socket.emit('load_note', room.notes);
+    socket.emit('timer_update', room.timer);
+
+    console.log(`User ${username} joined room: ${roomCode}`);
   });
 
+  // Chat messaging
   socket.on('send_message', (data) => {
     socket.to(data.roomCode).emit('receive_message', data);
   });
 
+  // File sharing (Images/Files)
   socket.on('send_file', (data) => {
     socket.to(data.roomCode).emit('receive_file', data);
   });
 
-  socket.on('update_note', (data) => {
-    roomNotes[data.roomCode] = data.text;
-    socket.to(data.roomCode).emit('receive_note', data.text);
+  // Shared Notes
+  socket.on('update_note', ({ roomCode, text }) => {
+    if (rooms[roomCode]) {
+      rooms[roomCode].notes = text;
+    }
+    socket.to(roomCode).emit('receive_note', text);
   });
 
-  // Pomodoro Timer Events
-  socket.on('start_timer', (roomCode) => {
-    if (!roomTimers[roomCode]) {
-      roomTimers[roomCode] = { timeLeft: 25 * 60, isRunning: true };
-    } else {
-      roomTimers[roomCode].isRunning = true;
-    }
+  // --- Whiteboard Events ---
+  socket.on('drawing', (data) => {
+    socket.to(data.roomCode).emit('receive_drawing', data);
+  });
 
-    if (!roomTimers[roomCode].interval) {
-      roomTimers[roomCode].interval = setInterval(() => {
-        if (roomTimers[roomCode].isRunning && roomTimers[roomCode].timeLeft > 0) {
-          roomTimers[roomCode].timeLeft--;
-          io.to(roomCode).emit('timer_update', roomTimers[roomCode].timeLeft);
-        } else if (roomTimers[roomCode].timeLeft <= 0) {
-          clearInterval(roomTimers[roomCode].interval);
-          roomTimers[roomCode].interval = null;
+  socket.on('clear_board', (roomCode) => {
+    socket.to(roomCode).emit('clear_board');
+  });
+
+  // Pomodoro Timer Controls
+  socket.on('start_timer', (roomCode) => {
+    const room = rooms[roomCode];
+    if (room && !room.timerRunning) {
+      room.timerRunning = true;
+      room.timerInterval = setInterval(() => {
+        if (room.timer > 0) {
+          room.timer--;
+          io.to(roomCode).emit('timer_update', room.timer);
+        } else {
+          clearInterval(room.timerInterval);
+          room.timerRunning = false;
         }
       }, 1000);
     }
   });
 
   socket.on('pause_timer', (roomCode) => {
-    if (roomTimers[roomCode]) {
-      roomTimers[roomCode].isRunning = false;
+    const room = rooms[roomCode];
+    if (room) {
+      clearInterval(room.timerInterval);
+      room.timerRunning = false;
     }
   });
 
   socket.on('reset_timer', (roomCode) => {
-    if (roomTimers[roomCode]) {
-      roomTimers[roomCode].isRunning = false;
-      clearInterval(roomTimers[roomCode].interval);
-      roomTimers[roomCode].interval = null;
-      roomTimers[roomCode].timeLeft = 25 * 60;
-      io.to(roomCode).emit('timer_update', roomTimers[roomCode].timeLeft);
+    const room = rooms[roomCode];
+    if (room) {
+      clearInterval(room.timerInterval);
+      room.timerRunning = false;
+      room.timer = 1500;
+      io.to(roomCode).emit('timer_update', room.timer);
     }
   });
 
-  // Voice Chat Signaling Events
+  // Voice Chat Signaling (Discord-style WebRTC)
   socket.on('join_voice', (roomCode) => {
     socket.to(roomCode).emit('user_joined_voice', socket.id);
   });
@@ -127,17 +133,30 @@ io.on('connection', (socket) => {
     socket.to(roomCode).emit('user_left_voice', socket.id);
   });
 
+  // Disconnect handling
   socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id}`);
-    const roomCode = socket.roomCode;
-    if (roomCode && roomUsers[roomCode]) {
-      roomUsers[roomCode] = roomUsers[roomCode].filter(u => u.id !== socket.id);
-      io.to(roomCode).emit('update_users', roomUsers[roomCode]);
+    console.log(`User Disconnected: ${socket.id}`);
+    
+    for (const roomCode in rooms) {
+      const room = rooms[roomCode];
+      const index = room.users.findIndex(u => u.id === socket.id);
+      if (index !== -1) {
+        room.users.splice(index, 1);
+        io.to(roomCode).emit('update_users', room.users);
+        io.to(roomCode).emit('user_left_voice', socket.id);
+
+        // Cleanup room if empty
+        if (room.users.length === 0) {
+          clearInterval(room.timerInterval);
+          delete rooms[roomCode];
+        }
+        break;
+      }
     }
   });
 });
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });
